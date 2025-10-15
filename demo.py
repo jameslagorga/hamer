@@ -4,6 +4,8 @@ import argparse
 import os
 import cv2
 import numpy as np
+import logging
+import time
 
 from hamer.configs import CACHE_DIR_HAMER
 from hamer.models import HAMER, load_hamer, DEFAULT_CHECKPOINT
@@ -19,6 +21,9 @@ import json
 from typing import Dict, Optional
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)03dZ %(levelname)s %(message)s', datefmt='%Y-%m-%dT%H:%M:%S')
+    logging.Formatter.converter = time.gmtime
+    logging.info("Starting demo.py")
     parser = argparse.ArgumentParser(description='HaMeR demo code')
     parser.add_argument('--data_dir', type=str, default='_DATA', help='Path to _DATA folder')
     parser.add_argument('--checkpoint', type=str, default='hamer_ckpts/checkpoints/hamer.ckpt', help='Path to pretrained model checkpoint, relative to data_dir')
@@ -209,6 +214,7 @@ def main():
             input_img_overlay = input_img[:,:,:3] * (1-cam_view[:,:,3:]) + cam_view[:,:,:3] * cam_view[:,:,3:]
 
             cv2.imwrite(os.path.join(args.out_folder, f'{img_fn}_all.jpg'), 255*input_img_overlay[:, :, ::-1])
+    logging.info("Finished demo.py")
 
 if __name__ == '__main__':
     main()

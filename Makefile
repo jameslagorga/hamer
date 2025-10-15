@@ -5,7 +5,7 @@ RUN_CHART := hamer-demo.yaml
 
 .PHONY: all build push
 
-all: build push
+all: build push run
 
 build:
 	docker build --platform $(DOCKER_BUILD_PLATFORM) -t $(IMAGE_NAME) -f $(DOCKERFILE) .
