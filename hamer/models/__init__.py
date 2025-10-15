@@ -29,11 +29,11 @@ def download_models(folder=CACHE_DIR_HAMER):
                 os.system("tar -xvf " + output_path)
 
 DEFAULT_CHECKPOINT=f'{CACHE_DIR_HAMER}/hamer_ckpts/checkpoints/hamer.ckpt'
-def load_hamer(checkpoint_path=DEFAULT_CHECKPOINT):
+def load_hamer(checkpoint_path=DEFAULT_CHECKPOINT, data_dir=None):
     from pathlib import Path
     from ..configs import get_config
     model_cfg = str(Path(checkpoint_path).parent.parent / 'model_config.yaml')
-    model_cfg = get_config(model_cfg, update_cachedir=True)
+    model_cfg = get_config(model_cfg, update_cachedir=True, data_dir=data_dir)
 
     # Override some config values, to crop bbox correctly
     if (model_cfg.MODEL.BACKBONE.TYPE == 'vit') and ('BBOX_SHAPE' not in model_cfg.MODEL):

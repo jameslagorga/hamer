@@ -20,7 +20,8 @@ from typing import Dict, Optional
 
 def main():
     parser = argparse.ArgumentParser(description='HaMeR demo code')
-    parser.add_argument('--checkpoint', type=str, default=DEFAULT_CHECKPOINT, help='Path to pretrained model checkpoint')
+    parser.add_argument('--data_dir', type=str, default='_DATA', help='Path to _DATA folder')
+    parser.add_argument('--checkpoint', type=str, default='hamer_ckpts/checkpoints/hamer.ckpt', help='Path to pretrained model checkpoint, relative to data_dir')
     parser.add_argument('--img_folder', type=str, default='images', help='Folder with input images')
     parser.add_argument('--out_folder', type=str, default='out_demo', help='Output folder to save rendered results')
     parser.add_argument('--side_view', dest='side_view', action='store_true', default=False, help='If set, render side view also')
@@ -30,11 +31,15 @@ def main():
     parser.add_argument('--rescale_factor', type=float, default=2.0, help='Factor for padding the bbox')
     parser.add_argument('--body_detector', type=str, default='vitdet', choices=['vitdet', 'regnety'], help='Using regnety improves runtime and reduces memory')
     parser.add_argument('--file_type', nargs='+', default=['*.jpg', '*.png'], help='List of file extensions to consider')
+    parser.add_argument('--latency_testing', action='store_true', help='If set, only process the first batch_size images')
 
     args = parser.parse_args()
 
     # Download and load checkpoints
-    model, model_cfg = load_hamer(args.checkpoint)
+    from pathlib import Path
+    data_dir = Path(args.data_dir)
+    checkpoint_path = data_dir / args.checkpoint
+    model, model_cfg = load_hamer(checkpoint_path, data_dir)
 
     # Setup HaMeR model
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -61,7 +66,7 @@ def main():
         detector       = DefaultPredictor_Lazy(detectron2_cfg)
 
     # keypoint detector
-    cpm = ViTPoseModel(device)
+    cpm = ViTPoseModel(device, args.data_dir)
 
     # Setup the renderer
     renderer = Renderer(model_cfg, faces=model.mano.faces)
@@ -71,6 +76,8 @@ def main():
 
     # Get all demo images ends with .jpg or .png
     img_paths = [img for end in args.file_type for img in Path(args.img_folder).glob(end)]
+    if args.latency_testing:
+        img_paths = img_paths[:args.batch_size]
 
     # Iterate over all images in folder
     for img_path in img_paths:
@@ -121,7 +128,6 @@ def main():
 
         # Run reconstruction on all detected hands
         dataset = ViTDetDataset(model_cfg, img_cv2, boxes, right, rescale_factor=args.rescale_factor)
-        print(f"Using batch size: {args.batch_size}")
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
 
         all_verts = []

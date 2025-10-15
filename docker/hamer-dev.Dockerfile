@@ -46,8 +46,14 @@ COPY third-party/ third-party/
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -v -e third-party/ViTPose
 
-# Install project dependencies:
+# Install project dependencies first, to leverage caching:
+COPY setup.py .
+RUN mkdir hamer && touch hamer/__init__.py
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install .[all]
+
+# Copy project code:
 COPY . .
-# Install hamer:
+# Install hamer in editable mode:
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -e .[all]
