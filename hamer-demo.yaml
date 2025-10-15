@@ -3,6 +3,7 @@ kind: Job
 metadata:
   name: hamer-demo
 spec:
+  ttlSecondsAfterFinished: 0
   template:
     spec:
       nodeSelector:
@@ -10,10 +11,15 @@ spec:
       containers:
       - name: hamer-demo
         image: gcr.io/lagorgeous-helping-hands/hamer:latest
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         command:
         - /bin/sh
         - -c
-        - "mkdir -p /mnt/nfs/jobs && python demo.py --img_folder /mnt/nfs/test_frames --out_folder /mnt/nfs/out_demo --batch_size 48 --checkpoint /mnt/nfs/_DATA/hamer_ckpts/checkpoints/hamer.ckpt --data_dir /mnt/nfs/_DATA 2>&1 | tee /mnt/nfs/jobs/hamer-demo.log"
+        - "mkdir -p /mnt/nfs/jobs/hamer-demo && python demo.py --img_folder /mnt/nfs/test_frames --out_folder /mnt/nfs/out_demo --batch_size 48 --checkpoint /mnt/nfs/_DATA/hamer_ckpts/checkpoints/hamer.ckpt --data_dir /mnt/nfs/_DATA 2>&1 | tee /mnt/nfs/jobs/hamer-demo/${POD_NAME}.log"
         resources:
           limits:
             nvidia.com/gpu: "1"
