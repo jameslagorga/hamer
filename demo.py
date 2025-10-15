@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from hamer.configs import CACHE_DIR_HAMER
-from hamer.models import HAMER, download_models, load_hamer, DEFAULT_CHECKPOINT
+from hamer.models import HAMER, load_hamer, DEFAULT_CHECKPOINT
 from hamer.utils import recursive_to
 from hamer.datasets.vitdet_dataset import ViTDetDataset, DEFAULT_MEAN, DEFAULT_STD
 from hamer.utils.renderer import Renderer, cam_crop_to_full
@@ -34,7 +34,6 @@ def main():
     args = parser.parse_args()
 
     # Download and load checkpoints
-    download_models(CACHE_DIR_HAMER)
     model, model_cfg = load_hamer(args.checkpoint)
 
     # Setup HaMeR model
