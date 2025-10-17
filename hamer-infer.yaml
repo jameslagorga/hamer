@@ -16,6 +16,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: expandable_segments:True
         command:
         - /bin/sh
         - -c

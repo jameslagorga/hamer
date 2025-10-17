@@ -13,6 +13,7 @@ from hamer.models import HAMER, load_hamer, DEFAULT_CHECKPOINT
 from hamer.utils import recursive_to
 from hamer.datasets.vitdet_dataset import ViTDetDataset, DEFAULT_MEAN, DEFAULT_STD
 from hamer.utils.renderer import cam_crop_to_full # Re-added this import
+import detectron2.data.transforms as T
 
 LIGHT_BLUE=(0.65098039,  0.74117647,  0.85882353)
 
@@ -79,119 +80,146 @@ def main():
     if args.testing:
         img_paths = img_paths[:args.batch_size]
 
-    # Iterate over all images in folder
-    for img_path in img_paths:
-        start_time = time.time()
-        img_cv2 = cv2.imread(str(img_path))
-        logging.info(f"Time for cv2.imread: {time.time() - start_time:.4f}s")
+    # Group image paths into batches for the detector
+    batched_img_paths_chunks = [img_paths[i:i + args.batch_size] for i in range(0, len(img_paths), args.batch_size)]
 
-        # Detect humans in image
-        start_time = time.time()
-        det_out = detector(img_cv2)
-        img = img_cv2.copy()[:, :, ::-1]
-        logging.info(f"Time for detector and image copy: {time.time() - start_time:.4f}s")
+    for batch_of_img_paths in batched_img_paths_chunks:
+        # Load images for the current batch
+        current_batch_original_images_bgr = [] # BGR for detector.aug
+        current_batch_img_cv2_original = [] # Original BGR for saving
+        current_batch_img_paths = []
+        current_batch_img_rgb_for_cpm = [] # RGB for cpm
 
-        start_time = time.time()
-        det_instances = det_out['instances']
-        valid_idx = (det_instances.pred_classes==0) & (det_instances.scores > 0.5)
-        pred_bboxes=det_instances.pred_boxes.tensor[valid_idx].cpu().numpy()
-        pred_scores=det_instances.scores[valid_idx].cpu().numpy()
-        logging.info(f"Time for bbox and score extraction: {time.time() - start_time:.4f}s")
+        start_time_load_batch = time.time()
+        for img_path in batch_of_img_paths:
+            img_cv2 = cv2.imread(str(img_path))
+            current_batch_img_cv2_original.append(img_cv2)
+            current_batch_original_images_bgr.append(img_cv2) # BGR for detector.aug
+            current_batch_img_paths.append(img_path)
+            current_batch_img_rgb_for_cpm.append(img_cv2.copy()[:, :, ::-1]) # RGB for cpm
+        logging.info(f"Time for cv2.imread batch ({len(batch_of_img_paths)} images): {time.time() - start_time_load_batch:.4f}s")
 
-        # Detect human keypoints for each person
-        start_time = time.time()
-        vitposes_out = cpm.predict_pose(
-            img,
-            [np.concatenate([pred_bboxes, pred_scores[:, None]], axis=1)],
-        )
-        logging.info(f"Time for cpm.predict_pose: {time.time() - start_time:.4f}s")
+        # Prepare batched input for Detectron2 model
+        batched_inputs_for_detector = []
+        for original_image_bgr in current_batch_original_images_bgr:
+            height, width = original_image_bgr.shape[:2]
+            processed_image = detector.aug(T.AugInput(original_image_bgr)).apply_image(original_image_bgr)
+            processed_image = torch.as_tensor(processed_image.astype("float32").transpose(2, 0, 1))
+            batched_inputs_for_detector.append({"image": processed_image, "height": height, "width": width})
 
-        start_time = time.time()
-        bboxes = []
-        is_right = []
+        # Detect humans in batch
+        start_time_det_batch = time.time()
+        with torch.no_grad():
+            batched_det_outputs = detector.model(batched_inputs_for_detector)
+        logging.info(f"Time for detector batch inference ({len(batch_of_img_paths)} images): {time.time() - start_time_det_batch:.4f}s")
 
-        # Use hands based on hand keypoint detections
-        for vitposes in vitposes_out:
-            left_hand_keyp = vitposes['keypoints'][-42:-21]
-            right_hand_keyp = vitposes['keypoints'][-21:]
+        # Process outputs for each image in the batch
+        for i, det_out in enumerate(batched_det_outputs):
+            img_path = current_batch_img_paths[i]
+            img_cv2 = current_batch_img_cv2_original[i] # Original BGR
+            img_rgb = current_batch_img_rgb_for_cpm[i] # RGB for cpm
 
-            # Rejecting not confident detections
-            keyp = np.array(left_hand_keyp) # Ensure keyp is a numpy array
-            valid = keyp[...,2] > 0.5
-            if sum(valid) > 3:
-                bbox = [keyp[valid,0].min(), keyp[valid,1].min(), keyp[valid,0].max(), keyp[valid,1].max()]
-                bboxes.append(bbox)
-                is_right.append(0)
-            keyp = np.array(right_hand_keyp) # Ensure keyp is a numpy array
-            valid = keyp[...,2] > 0.5
-            if sum(valid) > 3:
-                bbox = [keyp[valid,0].min(), keyp[valid,1].min(), keyp[valid,0].max(), keyp[valid,1].max()]
-                bboxes.append(bbox)
-                is_right.append(1)
-        logging.info(f"Time for hand keypoint processing: {time.time() - start_time:.4f}s")
+            start_time_det_post = time.time()
+            det_instances = det_out['instances']
+            valid_idx = (det_instances.pred_classes==0) & (det_instances.scores > 0.5)
+            pred_bboxes=det_instances.pred_boxes.tensor[valid_idx].cpu().numpy()
+            pred_scores=det_instances.scores[valid_idx].cpu().numpy()
+            logging.info(f"Time for bbox and score extraction (image {i+1} in batch): {time.time() - start_time_det_post:.4f}s")
 
-        if len(bboxes) == 0:
-            logging.info(f"No hands detected in {img_path}, skipping inference output saving.")
-            continue
+            # Detect human keypoints for each person
+            start_time = time.time()
+            vitposes_out = cpm.predict_pose(
+                img_rgb, # Use RGB image here
+                [np.concatenate([pred_bboxes, pred_scores[:, None]], axis=1)],
+            )
+            logging.info(f"Time for cpm.predict_pose: {time.time() - start_time:.4f}s")
 
-        start_time = time.time()
-        boxes = np.stack(bboxes)
-        right = np.stack(is_right)
-        logging.info(f"Time for bbox stacking: {time.time() - start_time:.4f}s")
+            start_time = time.time()
+            bboxes = []
+            is_right = []
 
-        # Run reconstruction on all detected hands
-        start_time = time.time()
-        dataset = ViTDetDataset(model_cfg, img_cv2, boxes, right, rescale_factor=args.rescale_factor)
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
-        logging.info(f"Time for dataset and dataloader creation: {time.time() - start_time:.4f}s")
+            # Use hands based on hand keypoint detections
+            for vitposes in vitposes_out:
+                left_hand_keyp = vitposes['keypoints'][-42:-21]
+                right_hand_keyp = vitposes['keypoints'][-21:]
 
-        all_verts = []
-        all_cam_t = []
-        all_right = []
-        
-        img_fn, _ = os.path.splitext(os.path.basename(img_path))
-        image_output_dir = os.path.join(args.inference_output_folder, img_fn)
-        os.makedirs(image_output_dir, exist_ok=True)
+                # Rejecting not confident detections
+                keyp = np.array(left_hand_keyp) # Ensure keyp is a numpy array
+                valid = keyp[...,2] > 0.5
+                if sum(valid) > 3:
+                    bbox = [keyp[valid,0].min(), keyp[valid,1].min(), keyp[valid,0].max(), keyp[valid,1].max()]
+                    bboxes.append(bbox)
+                    is_right.append(0)
+                keyp = np.array(right_hand_keyp) # Ensure keyp is a numpy array
+                valid = keyp[...,2] > 0.5
+                if sum(valid) > 3:
+                    bbox = [keyp[valid,0].min(), keyp[valid,1].min(), keyp[valid,0].max(), keyp[valid,1].max()]
+                    bboxes.append(bbox)
+                    is_right.append(1)
+            logging.info(f"Time for hand keypoint processing: {time.time() - start_time:.4f}s")
 
-        start_time = time.time()
-        for batch_idx, batch in enumerate(dataloader):
-            batch = recursive_to(batch, device)
-            with torch.no_grad():
-                out = model(batch)
+            if len(bboxes) == 0:
+                logging.info(f"No hands detected in {img_path}, skipping inference output saving.")
+                continue
 
-            multiplier = (2*batch['right']-1)
-            pred_cam = out['pred_cam']
-            pred_cam[:,1] = multiplier*pred_cam[:,1]
-            box_center = batch["box_center"].float()
-            box_size = batch["box_size"].float()
-            img_size = batch["img_size"].float()
-            multiplier = (2*batch['right']-1)
-            scaled_focal_length = model_cfg.EXTRA.FOCAL_LENGTH / model_cfg.MODEL.IMAGE_SIZE * img_size.max()
-            pred_cam_t_full = cam_crop_to_full(pred_cam, box_center, box_size, img_size, scaled_focal_length).detach().cpu().numpy()
+            start_time = time.time()
+            boxes = np.stack(bboxes)
+            right = np.stack(is_right)
+            logging.info(f"Time for bbox stacking: {time.time() - start_time:.4f}s")
 
-            batch_size = batch['img'].shape[0]
-            for n in range(batch_size):
-                person_id = int(batch['personid'][n])
-                
-                # Prepare data for saving
-                inference_data = {
-                    'pred_vertices': out['pred_vertices'][n].detach().cpu().numpy(),
-                    'pred_cam_t_full': pred_cam_t_full[n],
-                    'is_right': batch['right'][n].cpu().numpy(),
-                    'img_size': img_size[n].cpu().numpy(),
-                    'original_img_path': str(img_path),
-                    'original_img_cv2': img_cv2, # Save the original full image
-                    'model_cfg': model_cfg, # Pass model_cfg for renderer setup
-                    'faces': model.mano.faces, # Pass faces for renderer setup
-                    'focal_length': scaled_focal_length.cpu().numpy(), # Pass scaled focal length
-                }
+            # Run reconstruction on all detected hands
+            start_time = time.time()
+            dataset = ViTDetDataset(model_cfg, img_cv2, boxes, right, rescale_factor=args.rescale_factor)
+            dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+            logging.info(f"Time for dataset and dataloader creation: {time.time() - start_time:.4f}s")
 
-                # Save inference data
-                output_filepath = os.path.join(image_output_dir, f'person_{person_id}.pkl')
-                with open(output_filepath, 'wb') as f:
-                    pickle.dump(inference_data, f)
-                logging.info(f"Saved inference output for {img_fn}, person {person_id} to {output_filepath}")
-        logging.info(f"Time for dataloader loop (model inference and saving): {time.time() - start_time:.4f}s")
+            all_verts = []
+            all_cam_t = []
+            all_right = []
+            
+            img_fn, _ = os.path.splitext(os.path.basename(img_path))
+            image_output_dir = os.path.join(args.inference_output_folder, img_fn)
+            os.makedirs(image_output_dir, exist_ok=True)
+
+            start_time = time.time()
+            for batch_idx, batch in enumerate(dataloader):
+                batch = recursive_to(batch, device)
+                with torch.no_grad():
+                    out = model(batch)
+
+                multiplier = (2*batch['right']-1)
+                pred_cam = out['pred_cam']
+                pred_cam[:,1] = multiplier*pred_cam[:,1]
+                box_center = batch["box_center"].float()
+                box_size = batch["box_size"].float()
+                img_size = batch["img_size"].float()
+                multiplier = (2*batch['right']-1)
+                scaled_focal_length = model_cfg.EXTRA.FOCAL_LENGTH / model_cfg.MODEL.IMAGE_SIZE * img_size.max()
+                pred_cam_t_full = cam_crop_to_full(pred_cam, box_center, box_size, img_size, scaled_focal_length).detach().cpu().numpy()
+
+                batch_size = batch['img'].shape[0]
+                for n in range(batch_size):
+                    person_id = int(batch['personid'][n])
+                    
+                    # Prepare data for saving
+                    inference_data = {
+                        'pred_vertices': out['pred_vertices'][n].detach().cpu().numpy(),
+                        'pred_cam_t_full': pred_cam_t_full[n],
+                        'is_right': batch['right'][n].cpu().numpy(),
+                        'img_size': img_size[n].cpu().numpy(),
+                        'original_img_path': str(img_path),
+                        'original_img_cv2': img_cv2, # Save the original full image
+                        'model_cfg': model_cfg, # Pass model_cfg for renderer setup
+                        'faces': model.mano.faces, # Pass faces for renderer setup
+                        'focal_length': scaled_focal_length.cpu().numpy(), # Pass scaled focal length
+                    }
+
+                    # Save inference data
+                    output_filepath = os.path.join(image_output_dir, f'person_{person_id}.pkl')
+                    with open(output_filepath, 'wb') as f:
+                        pickle.dump(inference_data, f)
+                    logging.info(f"Saved inference output for {img_fn}, person {person_id} to {output_filepath}")
+            logging.info(f"Time for dataloader loop (model inference and saving): {time.time() - start_time:.4f}s")
 
     logging.info("Finished infer.py (Inference Job)")
 

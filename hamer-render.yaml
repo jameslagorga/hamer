@@ -19,11 +19,7 @@ spec:
         - /bin/sh
         - -c
         - "mkdir -p /mnt/nfs/rendered_outputs && python render.py --inference_input_folder /mnt/nfs/inference_outputs --output_folder /mnt/nfs/rendered_outputs --full_frame --side_view --save_mesh 2>&1 | tee /mnt/nfs/jobs/hamer-render/${POD_NAME}.log" # Command to run render.py
-        resources:
-          # No GPU limits, as this is a CPU-bound job
-          limits:
-            cpu: "2" # Example CPU limit
-            memory: "4Gi" # Example memory limit
+        
         volumeMounts:
         - name: nfs-storage
           mountPath: /mnt/nfs
