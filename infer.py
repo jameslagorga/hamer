@@ -6,12 +6,13 @@ import cv2
 import numpy as np
 import logging
 import time
+import pickle
 
 from hamer.configs import CACHE_DIR_HAMER
 from hamer.models import HAMER, load_hamer, DEFAULT_CHECKPOINT
 from hamer.utils import recursive_to
 from hamer.datasets.vitdet_dataset import ViTDetDataset, DEFAULT_MEAN, DEFAULT_STD
-from hamer.utils.renderer import Renderer, cam_crop_to_full
+from hamer.utils.renderer import cam_crop_to_full # Re-added this import
 
 LIGHT_BLUE=(0.65098039,  0.74117647,  0.85882353)
 
@@ -23,15 +24,12 @@ from typing import Dict, Optional
 def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)03dZ %(levelname)s %(message)s', datefmt='%Y-%m-%dT%H:%M:%S')
     logging.Formatter.converter = time.gmtime
-    logging.info("Starting demo.py")
-    parser = argparse.ArgumentParser(description='HaMeR demo code')
+    logging.info("Starting infer.py (Inference Job)")
+    parser = argparse.ArgumentParser(description='HaMeR inference code')
     parser.add_argument('--data_dir', type=str, default='_DATA', help='Path to _DATA folder')
     parser.add_argument('--checkpoint', type=str, default='hamer_ckpts/checkpoints/hamer.ckpt', help='Path to pretrained model checkpoint, relative to data_dir')
     parser.add_argument('--img_folder', type=str, default='images', help='Folder with input images')
-    parser.add_argument('--out_folder', type=str, default='out_demo', help='Output folder to save rendered results')
-    parser.add_argument('--side_view', dest='side_view', action='store_true', default=False, help='If set, render side view also')
-    parser.add_argument('--full_frame', dest='full_frame', action='store_true', default=True, help='If set, render all people together also')
-    parser.add_argument('--save_mesh', dest='save_mesh', action='store_true', default=False, help='If set, save meshes to disk also')
+    parser.add_argument('--inference_output_folder', type=str, default='inference_outputs', help='Folder to save raw inference outputs')
     parser.add_argument('--batch_size', type=int, default=48, help='Batch size for inference/fitting')
     parser.add_argument('--rescale_factor', type=float, default=2.0, help='Factor for padding the bbox')
     parser.add_argument('--body_detector', type=str, default='vitdet', choices=['vitdet', 'regnety'], help='Using regnety improves runtime and reduces memory')
@@ -73,11 +71,8 @@ def main():
     # keypoint detector
     cpm = ViTPoseModel(device, args.data_dir)
 
-    # Setup the renderer
-    renderer = Renderer(model_cfg, faces=model.mano.faces)
-
-    # Make output directory if it does not exist
-    os.makedirs(args.out_folder, exist_ok=True)
+    # Make inference output directory if it does not exist
+    os.makedirs(args.inference_output_folder, exist_ok=True)
 
     # Get all demo images ends with .jpg or .png
     img_paths = [img for end in args.file_type for img in Path(args.img_folder).glob(end)]
@@ -86,23 +81,32 @@ def main():
 
     # Iterate over all images in folder
     for img_path in img_paths:
+        start_time = time.time()
         img_cv2 = cv2.imread(str(img_path))
+        logging.info(f"Time for cv2.imread: {time.time() - start_time:.4f}s")
 
         # Detect humans in image
+        start_time = time.time()
         det_out = detector(img_cv2)
         img = img_cv2.copy()[:, :, ::-1]
+        logging.info(f"Time for detector and image copy: {time.time() - start_time:.4f}s")
 
+        start_time = time.time()
         det_instances = det_out['instances']
         valid_idx = (det_instances.pred_classes==0) & (det_instances.scores > 0.5)
         pred_bboxes=det_instances.pred_boxes.tensor[valid_idx].cpu().numpy()
         pred_scores=det_instances.scores[valid_idx].cpu().numpy()
+        logging.info(f"Time for bbox and score extraction: {time.time() - start_time:.4f}s")
 
         # Detect human keypoints for each person
+        start_time = time.time()
         vitposes_out = cpm.predict_pose(
             img,
             [np.concatenate([pred_bboxes, pred_scores[:, None]], axis=1)],
         )
+        logging.info(f"Time for cpm.predict_pose: {time.time() - start_time:.4f}s")
 
+        start_time = time.time()
         bboxes = []
         is_right = []
 
@@ -112,37 +116,45 @@ def main():
             right_hand_keyp = vitposes['keypoints'][-21:]
 
             # Rejecting not confident detections
-            keyp = left_hand_keyp
+            keyp = np.array(left_hand_keyp) # Ensure keyp is a numpy array
             valid = keyp[...,2] > 0.5
             if sum(valid) > 3:
                 bbox = [keyp[valid,0].min(), keyp[valid,1].min(), keyp[valid,0].max(), keyp[valid,1].max()]
                 bboxes.append(bbox)
                 is_right.append(0)
-            keyp = right_hand_keyp
+            keyp = np.array(right_hand_keyp) # Ensure keyp is a numpy array
             valid = keyp[...,2] > 0.5
             if sum(valid) > 3:
                 bbox = [keyp[valid,0].min(), keyp[valid,1].min(), keyp[valid,0].max(), keyp[valid,1].max()]
                 bboxes.append(bbox)
                 is_right.append(1)
+        logging.info(f"Time for hand keypoint processing: {time.time() - start_time:.4f}s")
 
         if len(bboxes) == 0:
-            logging.info(f"No hands detected in {img_path}, saving original image.")
-            img_fn, _ = os.path.splitext(os.path.basename(img_path))
-            cv2.imwrite(os.path.join(args.out_folder, f'{img_fn}_no_hands.png'), img_cv2)
+            logging.info(f"No hands detected in {img_path}, skipping inference output saving.")
             continue
 
+        start_time = time.time()
         boxes = np.stack(bboxes)
         right = np.stack(is_right)
+        logging.info(f"Time for bbox stacking: {time.time() - start_time:.4f}s")
 
         # Run reconstruction on all detected hands
+        start_time = time.time()
         dataset = ViTDetDataset(model_cfg, img_cv2, boxes, right, rescale_factor=args.rescale_factor)
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        logging.info(f"Time for dataset and dataloader creation: {time.time() - start_time:.4f}s")
 
         all_verts = []
         all_cam_t = []
         all_right = []
         
-        for batch in dataloader:
+        img_fn, _ = os.path.splitext(os.path.basename(img_path))
+        image_output_dir = os.path.join(args.inference_output_folder, img_fn)
+        os.makedirs(image_output_dir, exist_ok=True)
+
+        start_time = time.time()
+        for batch_idx, batch in enumerate(dataloader):
             batch = recursive_to(batch, device)
             with torch.no_grad():
                 out = model(batch)
@@ -157,67 +169,31 @@ def main():
             scaled_focal_length = model_cfg.EXTRA.FOCAL_LENGTH / model_cfg.MODEL.IMAGE_SIZE * img_size.max()
             pred_cam_t_full = cam_crop_to_full(pred_cam, box_center, box_size, img_size, scaled_focal_length).detach().cpu().numpy()
 
-            # Render the result
             batch_size = batch['img'].shape[0]
             for n in range(batch_size):
-                # Get filename from path img_path
-                img_fn, _ = os.path.splitext(os.path.basename(img_path))
                 person_id = int(batch['personid'][n])
-                white_img = (torch.ones_like(batch['img'][n]).cpu() - DEFAULT_MEAN[:,None,None]/255) / (DEFAULT_STD[:,None,None]/255)
-                input_patch = batch['img'][n].cpu() * (DEFAULT_STD[:,None,None]/255) + (DEFAULT_MEAN[:,None,None]/255)
-                input_patch = input_patch.permute(1,2,0).numpy()
+                
+                # Prepare data for saving
+                inference_data = {
+                    'pred_vertices': out['pred_vertices'][n].detach().cpu().numpy(),
+                    'pred_cam_t_full': pred_cam_t_full[n],
+                    'is_right': batch['right'][n].cpu().numpy(),
+                    'img_size': img_size[n].cpu().numpy(),
+                    'original_img_path': str(img_path),
+                    'original_img_cv2': img_cv2, # Save the original full image
+                    'model_cfg': model_cfg, # Pass model_cfg for renderer setup
+                    'faces': model.mano.faces, # Pass faces for renderer setup
+                    'focal_length': scaled_focal_length.cpu().numpy(), # Pass scaled focal length
+                }
 
-                regression_img = renderer(out['pred_vertices'][n].detach().cpu().numpy(),
-                                        out['pred_cam_t'][n].detach().cpu().numpy(),
-                                        batch['img'][n],
-                                        mesh_base_color=LIGHT_BLUE,
-                                        scene_bg_color=(1, 1, 1),
-                                        )
+                # Save inference data
+                output_filepath = os.path.join(image_output_dir, f'person_{person_id}.pkl')
+                with open(output_filepath, 'wb') as f:
+                    pickle.dump(inference_data, f)
+                logging.info(f"Saved inference output for {img_fn}, person {person_id} to {output_filepath}")
+        logging.info(f"Time for dataloader loop (model inference and saving): {time.time() - start_time:.4f}s")
 
-                if args.side_view:
-                    side_img = renderer(out['pred_vertices'][n].detach().cpu().numpy(),
-                                            out['pred_cam_t'][n].detach().cpu().numpy(),
-                                            white_img,
-                                            mesh_base_color=LIGHT_BLUE,
-                                            scene_bg_color=(1, 1, 1),
-                                            side_view=True)
-                    final_img = np.concatenate([input_patch, regression_img, side_img], axis=1)
-                else:
-                    final_img = np.concatenate([input_patch, regression_img], axis=1)
-
-                cv2.imwrite(os.path.join(args.out_folder, f'{img_fn}_{person_id}.png'), 255*final_img[:, :, ::-1])
-
-                # Add all verts and cams to list
-                verts = out['pred_vertices'][n].detach().cpu().numpy()
-                is_right = batch['right'][n].cpu().numpy()
-                verts[:,0] = (2*is_right-1)*verts[:,0]
-                cam_t = pred_cam_t_full[n]
-                all_verts.append(verts)
-                all_cam_t.append(cam_t)
-                all_right.append(is_right)
-
-                # Save all meshes to disk
-                if args.save_mesh:
-                    camera_translation = cam_t.copy()
-                    tmesh = renderer.vertices_to_trimesh(verts, camera_translation, LIGHT_BLUE, is_right=is_right)
-                    tmesh.export(os.path.join(args.out_folder, f'{img_fn}_{person_id}.obj'))
-
-        # Render front view
-        if args.full_frame and len(all_verts) > 0:
-            misc_args = dict(
-                mesh_base_color=LIGHT_BLUE,
-                scene_bg_color=(1, 1, 1),
-                focal_length=scaled_focal_length,
-            )
-            cam_view = renderer.render_rgba_multiple(all_verts, cam_t=all_cam_t, render_res=img_size[n], is_right=all_right, **misc_args)
-
-            # Overlay image
-            input_img = img_cv2.astype(np.float32)[:,:,::-1]/255.0
-            input_img = np.concatenate([input_img, np.ones_like(input_img[:,:,:1])], axis=2) # Add alpha channel
-            input_img_overlay = input_img[:,:,:3] * (1-cam_view[:,:,3:]) + cam_view[:,:,:3] * cam_view[:,:,3:]
-
-            cv2.imwrite(os.path.join(args.out_folder, f'{img_fn}_all.jpg'), 255*input_img_overlay[:, :, ::-1])
-    logging.info("Finished demo.py")
+    logging.info("Finished infer.py (Inference Job)")
 
 if __name__ == '__main__':
     main()

@@ -1,15 +1,14 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: hamer-demo
+  name: hamer-render
 spec:
   ttlSecondsAfterFinished: 0
   template:
     spec:
-      nodeSelector:
-        node-pool-type: gpu-pool
+      # No nodeSelector for GPU-pool, as this job is CPU-bound
       containers:
-      - name: hamer-demo
+      - name: hamer-render
         image: gcr.io/lagorgeous-helping-hands/hamer:latest
         env:
         - name: POD_NAME
@@ -19,11 +18,12 @@ spec:
         command:
         - /bin/sh
         - -c
-        - "mkdir -p /mnt/nfs/demo_out_1 && 
-        python demo.py --img_folder /mnt/nfs/frames --out_folder /mnt/nfs/demo_out_1 --batch_size 1 --checkpoint /mnt/nfs/_DATA/hamer_ckpts/checkpoints/hamer.ckpt --data_dir /mnt/nfs/_DATA 2>&1 | tee /mnt/nfs/jobs/hamer-demo/${POD_NAME}.log"
+        - "mkdir -p /mnt/nfs/rendered_outputs && python render.py --inference_input_folder /mnt/nfs/inference_outputs --output_folder /mnt/nfs/rendered_outputs --full_frame --side_view --save_mesh 2>&1 | tee /mnt/nfs/jobs/hamer-render/${POD_NAME}.log" # Command to run render.py
         resources:
+          # No GPU limits, as this is a CPU-bound job
           limits:
-            nvidia.com/gpu: "1"
+            cpu: "2" # Example CPU limit
+            memory: "4Gi" # Example memory limit
         volumeMounts:
         - name: nfs-storage
           mountPath: /mnt/nfs

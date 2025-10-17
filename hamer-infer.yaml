@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hamer-infer # Name of this Kubernetes Job
+spec:
+  ttlSecondsAfterFinished: 0
+  template:
+    spec:
+      nodeSelector:
+        node-pool-type: gpu-pool # Ensure it runs on a GPU-enabled node
+      containers:
+      - name: hamer-infer
+        image: gcr.io/lagorgeous-helping-hands/hamer:latest # Your Docker image
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - /bin/sh
+        - -c
+        - "rm -r /mnt/nfs/inference_outputs && mkdir -p /mnt/nfs/jobs/hamer-infer && mkdir -p /mnt/nfs/inference_outputs && python infer.py --testing --img_folder /mnt/nfs/frames --inference_output_folder /mnt/nfs/inference_outputs --batch_size 256 --checkpoint /mnt/nfs/_DATA/hamer_ckpts/checkpoints/hamer.ckpt --data_dir /mnt/nfs/_DATA 2>&1 | tee /mnt/nfs/jobs/hamer-infer/${POD_NAME}.log" # Command to run infer.py
+        resources:
+          limits:
+            nvidia.com/gpu: "1" # Request a GPU
+        volumeMounts:
+        - name: nfs-storage
+          mountPath: /mnt/nfs # Mount your shared storage
+      volumes:
+      - name: nfs-storage
+        persistentVolumeClaim:
+          claimName: filestore-pvc # Your Persistent Volume Claim
+      restartPolicy: OnFailure

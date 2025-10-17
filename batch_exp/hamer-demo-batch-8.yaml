@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: hamer-demo
+  name: hamer-demo-batch-size-8
 spec:
   ttlSecondsAfterFinished: 0
   template:
@@ -19,8 +19,8 @@ spec:
         command:
         - /bin/sh
         - -c
-        - "mkdir -p /mnt/nfs/demo_out_1 && 
-        python demo.py --img_folder /mnt/nfs/frames --out_folder /mnt/nfs/demo_out_1 --batch_size 1 --checkpoint /mnt/nfs/_DATA/hamer_ckpts/checkpoints/hamer.ckpt --data_dir /mnt/nfs/_DATA 2>&1 | tee /mnt/nfs/jobs/hamer-demo/${POD_NAME}.log"
+        - "mkdir -p /mnt/nfs/demo_out_8 && 
+        python demo.py --testing --img_folder /mnt/nfs/frames --out_folder /mnt/nfs/demo_out_8 --batch_size 8 --checkpoint /mnt/nfs/_DATA/hamer_ckpts/checkpoints/hamer.ckpt --data_dir /mnt/nfs/_DATA 2>&1 | tee /mnt/nfs/jobs/hamer-demo/${POD_NAME}.log"
         resources:
           limits:
             nvidia.com/gpu: "1"
