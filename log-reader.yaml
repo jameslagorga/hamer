@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: log-reader
+spec:
+  containers:
+  - name: log-reader
+    image: busybox
+    command: ["cat", "/mnt/nfs/jobs/hamer-infer/hamer-infer-rbwd8.log"]
+    volumeMounts:
+    - name: nfs-storage
+      mountPath: /mnt/nfs
+  volumes:
+  - name: nfs-storage
+    persistentVolumeClaim:
+      claimName: filestore-pvc
+  restartPolicy: Never

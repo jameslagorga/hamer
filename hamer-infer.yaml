@@ -21,7 +21,7 @@ spec:
         command:
         - /bin/sh
         - -c
-        - "rm -r /mnt/nfs/inference_outputs && mkdir -p /mnt/nfs/jobs/hamer-infer && mkdir -p /mnt/nfs/inference_outputs && python infer.py --testing --img_folder /mnt/nfs/frames --inference_output_folder /mnt/nfs/inference_outputs --batch_size 256 --checkpoint /mnt/nfs/_DATA/hamer_ckpts/checkpoints/hamer.ckpt --data_dir /mnt/nfs/_DATA 2>&1 | tee /mnt/nfs/jobs/hamer-infer/${POD_NAME}.log" # Command to run infer.py
+        - "rm -r /mnt/nfs/inference_outputs && mkdir -p /mnt/nfs/jobs/hamer-infer && mkdir -p /mnt/nfs/inference_outputs && python infer.py --testing --img_folder /mnt/nfs/frames --inference_output_folder /mnt/nfs/inference_outputs --batch_size 32 --body_detector regnety --checkpoint /mnt/nfs/_DATA/hamer_ckpts/checkpoints/hamer.ckpt --data_dir /mnt/nfs/_DATA 2>&1 | tee /mnt/nfs/jobs/hamer-infer/${POD_NAME}.log" # Command to run infer.py
         resources:
           limits:
             nvidia.com/gpu: "1" # Request a GPU
