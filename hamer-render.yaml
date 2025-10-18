@@ -18,7 +18,7 @@ spec:
         command:
         - /bin/sh
         - -c
-        - "mkdir -p /mnt/nfs/rendered_outputs && python render.py --inference_input_folder /mnt/nfs/inference_outputs --output_folder /mnt/nfs/rendered_outputs --full_frame --side_view --save_mesh 2>&1 | tee /mnt/nfs/jobs/hamer-render/${POD_NAME}.log" # Command to run render.py
+        - "rm -r /mnt/nfs/rendered_outputs && mkdir -p /mnt/nfs/jobs/hamer-render && mkdir -p /mnt/nfs/rendered_outputs && python render.py --inference_input_folder /mnt/nfs/inference_outputs --output_folder /mnt/nfs/rendered_outputs --full_frame 2>&1 | tee /mnt/nfs/jobs/hamer-render/${POD_NAME}.log" # Command to run render.py
         
         volumeMounts:
         - name: nfs-storage

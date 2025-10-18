@@ -69,6 +69,7 @@ def main():
         detectron2_cfg.model.roi_heads.box_predictor.test_score_thresh = 0.5
         detectron2_cfg.model.roi_heads.box_predictor.test_nms_thresh   = 0.4
         detector       = DefaultPredictor_Lazy(detectron2_cfg)
+        detector.model.half() # Convert to FP16 for faster inference
 
     # keypoint detector
     cpm = ViTPoseModel(device, args.data_dir)
