@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hamer-check-trtexec-version-from-nfs
+spec:
+  ttlSecondsAfterFinished: 10
+  template:
+    spec:
+      nodeSelector:
+        node-pool-type: gpu-pool
+      containers:
+      - name: hamer-check-trtexec-version-from-nfs
+        image: gcr.io/lagorgeous-helping-hands/hamer:latest
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          LOG_DIR="/mnt/nfs/jobs/hamer-check-trtexec-version-from-nfs"
+          mkdir -p ${LOG_DIR}
+          LOG_FILE="${LOG_DIR}/${POD_NAME}.log"
+          (
+            echo "Installing TensorRT from /mnt/nfs/nv-tensorrt-local-repo-ubuntu2204-10.7.0-cuda-12.6_1.0-1_amd64.deb..."
+            dpkg -i /mnt/nfs/nv-tensorrt-local-repo-ubuntu2204-10.7.0-cuda-12.6_1.0-1_amd64.deb
+            echo "Updating apt repositories..."
+            apt-get update --allow-insecure-repositories
+            echo "Installing tensorrt package..."
+            apt-get install -y --allow-unauthenticated tensorrt
+            echo "Searching for trtexec..."
+            TRTEXEC_PATH=$(find / -name trtexec)
+            if [ -n "${TRTEXEC_PATH}" ]; then
+              echo "Found trtexec at: ${TRTEXEC_PATH}"
+              echo "Running trtexec --help"
+              ${TRTEXEC_PATH} --help
+            else
+              echo "trtexec not found after installation."
+              exit 1
+            fi
+          ) 2>&1 | tee ${LOG_FILE}
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: nfs-storage
+          mountPath: /mnt/nfs
+      volumes:
+      - name: nfs-storage
+        persistentVolumeClaim:
+          claimName: filestore-pvc
+      restartPolicy: OnFailure
