@@ -1,4 +1,4 @@
-ARG BASE=nvidia/cuda:12.6.2-devel-ubuntu22.04
+ARG BASE=mirror.gcr.io/nvidia/cuda:12.6.2-devel-ubuntu22.04
 FROM ${BASE} AS hamer
 
 # Install OS dependencies:
