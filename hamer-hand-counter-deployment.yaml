@@ -36,7 +36,6 @@ spec:
             --project_id=lagorgeous-helping-hands \
             --subscription_id=hamer-hand-counter-subscription \
             --data_dir=/mnt/nfs/_DATA \
-            --output_folder=/mnt/nfs/hand_counts \
           2>&1 | tee /mnt/nfs/jobs/hamer-hand-counter/${POD_NAME}.log
         resources:
           limits:

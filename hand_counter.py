@@ -83,18 +83,20 @@ def process_image(image_path: str, args):
             logging.info(f"No hands detected in {image_path}, skipping.")
             return
 
-        # 4. Prepare output
+        # 4. Prepare output paths
         img_fn_stem = Path(image_path).stem
         stream_name = Path(image_path).parts[-3]
-        output_dir = Path(args.output_folder) / stream_name
-        output_dir.mkdir(parents=True, exist_ok=True)
+        annotations_dir = Path("/mnt/nfs/streams") / stream_name / "hamer" / "annotations"
+        results_dir = Path("/mnt/nfs/streams") / stream_name / "hamer" / "results"
+        annotations_dir.mkdir(parents=True, exist_ok=True)
+        results_dir.mkdir(parents=True, exist_ok=True)
 
         # 5. Draw boxes on the image and save it
         annotated_image = img_cv2.copy()
         for (x_min, y_min, x_max, y_max) in hand_boxes:
             cv2.rectangle(annotated_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
         
-        annotated_image_path = output_dir / f"{img_fn_stem}_annotated.jpg"
+        annotated_image_path = annotations_dir / f"{img_fn_stem}_annotated.jpg"
         cv2.imwrite(str(annotated_image_path), annotated_image)
         logging.info(f"Saved annotated image to {annotated_image_path}")
 
@@ -104,7 +106,7 @@ def process_image(image_path: str, args):
             "hand_count": len(hand_boxes),
             "bounding_boxes": hand_boxes
         }
-        json_output_path = output_dir / f"{img_fn_stem}_data.json"
+        json_output_path = results_dir / f"{img_fn_stem}_data.json"
         with open(json_output_path, 'w') as f:
             json.dump(output_data, f, indent=4)
         logging.info(f"Saved hand count data to {json_output_path}")
@@ -136,7 +138,6 @@ def main():
     parser.add_argument('--project_id', type=str, required=True, help='Your Google Cloud project ID.')
     parser.add_argument('--subscription_id', type=str, required=True, help='The Pub/Sub subscription ID.')
     parser.add_argument('--data_dir', type=str, default='/mnt/nfs/_DATA', help='Path to _DATA folder for model checkpoints.')
-    parser.add_argument('--output_folder', type=str, default='/mnt/nfs/hand_counts', help='Folder to save annotated images and JSON data.')
     
     args = parser.parse_args()
 
