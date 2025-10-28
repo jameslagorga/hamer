@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hamer-hand-counter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hamer-hand-counter
+  template:
+    metadata:
+      labels:
+        app: hamer-hand-counter
+    spec:
+      nodeSelector:
+        node-pool-type: gpu-pool # Still needs a GPU for the detector models
+      volumes:
+      - name: nfs-storage
+        persistentVolumeClaim:
+          claimName: filestore-pvc
+      containers:
+      - name: subscriber
+        image: gcr.io/lagorgeous-helping-hands/hamer:latest
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: expandable_segments:True
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /mnt/nfs/jobs/hamer-hand-counter && \
+          python hand_counter.py \
+            --project_id=lagorgeous-helping-hands \
+            --subscription_id=hamer-hand-counter-subscription \
+            --data_dir=/mnt/nfs/_DATA \
+            --output_folder=/mnt/nfs/hand_counts \
+          2>&1 | tee /mnt/nfs/jobs/hamer-hand-counter/${POD_NAME}.log
+        resources:
+          limits:
+            nvidia.com/gpu: "1" # Request a GPU
+        volumeMounts:
+        - name: nfs-storage
+          mountPath: /mnt/nfs

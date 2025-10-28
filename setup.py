@@ -23,6 +23,7 @@ setup(
         'einops',
         'xtcocotools',
         'pandas',
+        'google-cloud-pubsub',
     ],
     extras_require={
         'all': [
