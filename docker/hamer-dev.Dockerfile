@@ -41,6 +41,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install gdown
 
+# Install redis
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install redis
+
 # Install third-party dependencies ViTPose:
 COPY third-party/ third-party/
 RUN --mount=type=cache,target=/root/.cache/pip \
