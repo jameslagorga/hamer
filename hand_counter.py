@@ -195,6 +195,7 @@ def process_frame_callback(message: pubsub_v1.subscriber.message.Message, args) 
     """
     Callback function to process a single frame message from Pub/Sub.
     """
+    logging.info("Entered process_frame_callback.")
     try:
         data = json.loads(message.data)
         image_path = data["frame_path"]
@@ -226,20 +227,6 @@ def main():
     callback = lambda message: process_frame_callback(message, args)
 
     logging.info(f"Starting hand counter, listening for messages on {subscription_path}...")
-    streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
-    
-    try:
-        streaming_pull_future.result()
-    except Exception as e:
-        streaming_pull_future.cancel()
-        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
-    finally:
-        subscriber.close()
-        logging.info("Subscriber shut down.")
-
-if __name__ == '__main__':
-    main()
-unter, listening for messages on {subscription_path}...")
     streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
     
     try:
