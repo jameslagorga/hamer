@@ -200,9 +200,25 @@ def process_frame_callback(message: pubsub_v1.subscriber.message.Message, args) 
         data = json.loads(message.data)
         image_path = data["frame_path"]
         logging.info(f"Received message for image: {image_path}")
+
+        stream_name = Path(image_path).parts[-3]
+        last_processed_key = f"stream:{stream_name}:last_processed"
+        current_time = time.time()
+
+        time_between_messages = 1.0 / args.fps
+        last_processed_time_str = redis_client.get(last_processed_key)
+        if last_processed_time_str:
+            last_processed_time = float(last_processed_time_str)
+            if current_time - last_processed_time < time_between_messages:
+                logging.info(f"Rate limit: skipping message for stream {stream_name}.")
+                message.ack()
+                return
         
         process_image(image_path, args)
         
+        redis_client.set(last_processed_key, current_time)
+        logging.info(f"Updated last processed time for stream {stream_name}.")
+
         message.ack()
     except Exception as e:
         logging.error(f"An error occurred processing message: {e}")
@@ -216,6 +232,7 @@ def main():
     parser.add_argument('--project_id', type=str, required=True, help='Your Google Cloud project ID.')
     parser.add_argument('--subscription_id', type=str, required=True, help='The Pub/Sub subscription ID.')
     parser.add_argument('--data_dir', type=str, default='/mnt/nfs/_DATA', help='Path to _DATA folder for model checkpoints.')
+    parser.add_argument('--fps', type=float, default=1.0, help='Frames per second to process.')
     
     args = parser.parse_args()
 

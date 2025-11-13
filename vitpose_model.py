@@ -6,6 +6,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+import logging
+
 from mmpose.apis import inference_top_down_pose_model, init_pose_model, process_mmdet_results, vis_pose_result
 
 os.environ["PYOPENGL_PLATFORM"] = "egl"
@@ -31,7 +33,9 @@ class ViTPoseModel(object):
                 'model': f'{data_dir}/vitpose_ckpts/vitpose+_huge/wholebody.pth',
             },
         }
+        logging.info("Loading ViTPose model...")
         self.model = self._load_model(self.model_name)
+        logging.info("ViTPose model loaded.")
 
     def _load_all_models_once(self) -> None:
         for name in self.MODEL_DICT:
@@ -40,7 +44,9 @@ class ViTPoseModel(object):
     def _load_model(self, name: str) -> nn.Module:
         dic = self.MODEL_DICT[name]
         ckpt_path = dic['model']
+        logging.info(f"Loading ViTPose model from {ckpt_path}...")
         model = init_pose_model(dic['config'], ckpt_path, device=self.device)
+        logging.info(f"ViTPose model from {ckpt_path} loaded.")
         return model
 
     def set_model(self, name: str) -> None:

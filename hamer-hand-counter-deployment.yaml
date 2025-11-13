@@ -1,9 +1,19 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: v1
+kind: Service
 metadata:
   name: hamer-hand-counter
 spec:
-  replicas: 1
+  clusterIP: None
+  selector:
+    app: hamer-hand-counter
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hamer-hand-counter
+spec:
+  serviceName: "hamer-hand-counter"
+  replicas: 8
   selector:
     matchLabels:
       app: hamer-hand-counter
@@ -13,7 +23,7 @@ spec:
         app: hamer-hand-counter
     spec:
       nodeSelector:
-        node-pool-type: gpu-pool # Still needs a GPU for the detector models
+        node-pool-type: gpu-pool-l4
       volumes:
       - name: nfs-storage
         persistentVolumeClaim:
@@ -28,18 +38,24 @@ spec:
               fieldPath: metadata.name
         - name: PYTORCH_CUDA_ALLOC_CONF
           value: expandable_segments:True
+        - name: FPS
+          value: "0.0055555556"
         command: ["/bin/sh", "-c"]
         args:
         - |
+          POD_INDEX=$(echo ${POD_NAME} | rev | cut -d- -f1 | rev)
+          STREAM_NAME="stream-${POD_INDEX}"
+          SUBSCRIPTION_ID="hamer-hand-counter-subscription-${STREAM_NAME}"
           mkdir -p /mnt/nfs/jobs/hamer-hand-counter && \
           python hand_counter.py \
             --project_id=lagorgeous-helping-hands \
-            --subscription_id=hamer-hand-counter-subscription \
+            --subscription_id=${SUBSCRIPTION_ID} \
             --data_dir=/mnt/nfs/_DATA \
+            --fps=$(FPS) \
           2>&1 | tee /mnt/nfs/jobs/hamer-hand-counter/${POD_NAME}.log
         resources:
           limits:
-            nvidia.com/gpu: "1" # Request a GPU
+            nvidia.com/gpu: "1"
         volumeMounts:
         - name: nfs-storage
           mountPath: /mnt/nfs
