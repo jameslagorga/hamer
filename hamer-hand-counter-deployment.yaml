@@ -1,19 +1,9 @@
-apiVersion: v1
-kind: Service
-metadata:
-  name: hamer-hand-counter
-spec:
-  clusterIP: None
-  selector:
-    app: hamer-hand-counter
----
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: hamer-hand-counter
 spec:
-  serviceName: "hamer-hand-counter"
-  replicas: 8
+  replicas: 1
   selector:
     matchLabels:
       app: hamer-hand-counter
@@ -43,9 +33,7 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
-          POD_INDEX=$(echo ${POD_NAME} | rev | cut -d- -f1 | rev)
-          STREAM_NAME="stream-${POD_INDEX}"
-          SUBSCRIPTION_ID="hamer-hand-counter-subscription-${STREAM_NAME}"
+          SUBSCRIPTION_ID="hamer-hand-counter-subscription"
           mkdir -p /mnt/nfs/jobs/hamer-hand-counter && \
           python hand_counter.py \
             --project_id=lagorgeous-helping-hands \

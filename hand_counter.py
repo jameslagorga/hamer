@@ -119,7 +119,8 @@ def process_image(image_path: str, args):
             raise FileNotFoundError(f"Could not read image from path: {image_path}")
 
         img_fn_stem = Path(image_path).stem
-        stream_name = Path(image_path).parts[-3]
+        stream_name = Path(image_path).parts[-4]
+        short_pod_id = Path(image_path).parts[-3]
 
         # 1. Detect humans in the image
         det_out = detector(img_cv2)
@@ -162,8 +163,8 @@ def process_image(image_path: str, args):
         update_time_series_data(stream_name, hand_count, img_fn_stem)
 
         # 6. Prepare output paths
-        annotations_dir = Path("/mnt/nfs/streams") / stream_name / "hamer" / "annotations"
-        results_dir = Path("/mnt/nfs/streams") / stream_name / "hamer" / "results"
+        annotations_dir = Path("/mnt/nfs/streams") / stream_name / short_pod_id / "hamer" / "annotations"
+        results_dir = Path("/mnt/nfs/streams") / stream_name / short_pod_id / "hamer" / "results"
         annotations_dir.mkdir(parents=True, exist_ok=True)
         results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -194,6 +195,7 @@ def process_image(image_path: str, args):
 def process_frame_callback(message: pubsub_v1.subscriber.message.Message, args) -> None:
     """
     Callback function to process a single frame message from Pub/Sub.
+    Selects frames for processing based on their frame number to ensure uniform distribution.
     """
     logging.info("Entered process_frame_callback.")
     try:
@@ -201,23 +203,26 @@ def process_frame_callback(message: pubsub_v1.subscriber.message.Message, args) 
         image_path = data["frame_path"]
         logging.info(f"Received message for image: {image_path}")
 
-        stream_name = Path(image_path).parts[-3]
-        last_processed_key = f"stream:{stream_name}:last_processed"
-        current_time = time.time()
+        # Extract frame number from the filename (e.g., frame_00000123.jpg)
+        try:
+            frame_number = int(Path(image_path).stem.split('_')[-1])
+        except (ValueError, IndexError):
+            logging.warning(f"Could not parse frame number from {image_path}. Skipping.")
+            message.ack()
+            return
 
-        time_between_messages = 1.0 / args.fps
-        last_processed_time_str = redis_client.get(last_processed_key)
-        if last_processed_time_str:
-            last_processed_time = float(last_processed_time_str)
-            if current_time - last_processed_time < time_between_messages:
-                logging.info(f"Rate limit: skipping message for stream {stream_name}.")
-                message.ack()
-                return
-        
-        process_image(image_path, args)
-        
-        redis_client.set(last_processed_key, current_time)
-        logging.info(f"Updated last processed time for stream {stream_name}.")
+        # Calculate the frame selection interval
+        # For example, if source is 20fps and we want 1fps, we process every 20th frame.
+        selection_interval = int(round(args.source_fps / args.fps))
+        if selection_interval < 1:
+            selection_interval = 1
+
+        # Process frame only if it's part of our uniformly distributed selection
+        if frame_number % selection_interval == 0:
+            logging.info(f"Processing frame {frame_number} (interval: {selection_interval}).")
+            process_image(image_path, args)
+        else:
+            logging.info(f"Skipping frame {frame_number} (interval: {selection_interval}).")
 
         message.ack()
     except Exception as e:
@@ -233,6 +238,7 @@ def main():
     parser.add_argument('--subscription_id', type=str, required=True, help='The Pub/Sub subscription ID.')
     parser.add_argument('--data_dir', type=str, default='/mnt/nfs/_DATA', help='Path to _DATA folder for model checkpoints.')
     parser.add_argument('--fps', type=float, default=1.0, help='Frames per second to process.')
+    parser.add_argument('--source_fps', type=float, default=20.0, help='Source video frames per second.')
     
     args = parser.parse_args()
 
