@@ -237,7 +237,7 @@ def main():
     parser.add_argument('--project_id', type=str, required=True, help='Your Google Cloud project ID.')
     parser.add_argument('--subscription_id', type=str, required=True, help='The Pub/Sub subscription ID.')
     parser.add_argument('--data_dir', type=str, default='/mnt/nfs/_DATA', help='Path to _DATA folder for model checkpoints.')
-    parser.add_argument('--fps', type=float, default=1.0, help='Frames per second to process.')
+    parser.add_argument('--fps', type=float, default=0.1, help='Frames per second to process.')
     parser.add_argument('--source_fps', type=float, default=20.0, help='Source video frames per second.')
     
     args = parser.parse_args()
